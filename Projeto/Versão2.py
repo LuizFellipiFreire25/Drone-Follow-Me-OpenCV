@@ -1,3 +1,4 @@
+# essa é uma continuação da versão anterior, com a adição do controle proporcional, onde uma velocidade de correção é adicionada na tela
 import cv2
 import sys
 
