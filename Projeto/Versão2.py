@@ -70,7 +70,7 @@ if not video.isOpened():
 # Cores e fontes
 cor_sucesso = (0, 255, 0)
 cor_falha = (0, 0, 255)
-cor_info = (0, 255, 255)
+cor_info = (0, 0, 255)
 cor_caixa_ia = (255, 178, 50)
 fonte = cv2.FONT_HERSHEY_SIMPLEX
 
