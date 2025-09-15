@@ -188,6 +188,12 @@ while True:
             comando_final = f"Pos: {comando_posicao} | Dist: {comando_distancia}"
             cv2.putText(frame, comando_final, (10, 30),
                         fonte, 0.6, cor_info, 2)
+        else:
+            # RASTREAMENTO FALHOU!
+            cv2.putText(frame, "Alvo Perdido!", (100, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, cor_falha, 2)
+            # Apenas muda o modo, não tenta selecionar aqui
+            modo_atual = MODO_DETECCAO
 
     elif modo_atual == MODO_DETECCAO:
         deteccoes_frame_atual = []  # Limpa a lista a cada frame
@@ -227,9 +233,6 @@ while True:
                     texto = f"{label}: {confidence:.2f}"
                     cv2.putText(frame, texto, (x, y - 5),
                                 fonte, 0.5, cor_caixa_ia, 2)
-
-        cv2.putText(frame, "Clique em um objeto para seguir",
-                    (10, 30), fonte, 0.75, cor_info, 2)
 
     # Exibe o resultado final na janela
     cv2.imshow(win_name, frame)
