@@ -1,6 +1,19 @@
 # essa é uma continuação da versão anterior, com a adição do controle proporcional, onde uma velocidade de correção é adicionada na tela
 import cv2
 import sys
+import serial  # NOVO: Importa a biblioteca para comunicação serial
+import time   # NOVO: Para dar um tempo para a conexão serial estabilizar
+
+# --- CONFIGURAÇÃO DA COMUNICAÇÃO SERIAL (NOVO) ---
+try:
+    arduino = serial.Serial(port='COM4', baudrate=9600, timeout=0.1)
+    time.sleep(2)  # Espera 2 segundos para a conexão se estabelecer
+    print("Conexão com o Arduino estabelecida.")
+except serial.SerialException as e:
+    print(f"Erro ao conectar com o Arduino: {e}")
+    print("O programa continuará em modo de simulação.")
+    arduino = None
+# ---------------------------------------------------
 
 # --- MODOS DE OPERAÇÃO ---
 MODO_DETECCAO = 0
@@ -99,6 +112,9 @@ while True:
         ok, bbox = tracker.update(frame)
 
         if ok:
+            comando_pos_serial = ''
+            comando_dist_serial = ''
+
             # --- LÓGICA DE CONTROLE PROPORCIONAL (P-Controller) ---
 
             # --- 1. Controle de Posição (Esquerda/Direita) ---
@@ -118,10 +134,13 @@ while True:
             zona_morta = 30  # Usamos a zona morta para o comando "PARADO"
             if erro_posicao < -zona_morta:
                 comando_posicao = f"MOVER ESQUERDA (Vel: {abs(velocidade_horizontal):.1f})"
+                comando_pos_serial = 'L'  # L for Left
             elif erro_posicao > zona_morta:
                 comando_posicao = f"MOVER DIREITA (Vel: {velocidade_horizontal:.1f})"
+                comando_pos_serial = 'R'  # R for Right
             else:
                 comando_posicao = "CENTRALIZADO"
+                comando_pos_serial = 'C'  # C for Center
                 velocidade_horizontal = 0
 
             # --- 2. Controle de Distância (Frente/Trás) ---
@@ -140,11 +159,21 @@ while True:
             threshold_area = 0.15  # 15% de margem
             if area_atual > area_referencia * (1 + threshold_area):
                 comando_distancia = f"AFASTAR (Vel: {abs(velocidade_profundidade):.1f})"
+                comando_dist_serial = 'F'  # F for Afastar
             elif area_atual < area_referencia * (1 - threshold_area):
                 comando_distancia = f"APROXIMAR (Vel: {velocidade_profundidade:.1f})"
+                comando_dist_serial = 'A'  # A for Aproximar
             else:
                 comando_distancia = "MANTER DISTANCIA"
                 velocidade_profundidade = 0
+                comando_dist_serial = 'M'  # M for Manter
+
+             # --- ENVIO DO COMANDO PARA O ARDUINO (NOVO) ---
+            if arduino is not None and comando_pos_serial and comando_dist_serial:
+                # Formata o comando como "P,D\n" (ex: "L,A\n")
+                comando_final_serial = f"{comando_pos_serial},{comando_dist_serial}\n"
+                # Envia o comando, codificado em bytes
+                arduino.write(comando_final_serial.encode('utf-8'))
 
             # --- FIM DO CONTROLE PROPORCIONAL ---
 
@@ -207,6 +236,12 @@ while True:
 
     if cv2.waitKey(1) & 0xFF == 27:  # ESC para sair
         break
+    # --- FINALIZAÇÃO (MODIFICADO) ---
+if arduino is not None:
+    # Manda um comando final para centralizar tudo antes de fechar
+    arduino.write('C,M\n'.encode('utf-8'))
+    arduino.close()
+    print("Conexão com o Arduino fechada.")
 
 video.release()
 cv2.destroyAllWindows()
