@@ -132,16 +132,31 @@ while True:
 
             # Gera o comando de texto baseado na velocidade calculada
             zona_morta = 30  # Usamos a zona morta para o comando "PARADO"
+
+            # NOVO: Define os parâmetros para o controle do servo motor
+            fator_conversao = 4.5  # Sua calibração: graus por unidade de velocidade
+            angulo_centro = 90
+            angulo_min = 0
+            angulo_max = 180
+
+            # NOVO: Calcula o quanto o ângulo deve se deslocar a partir do centro, baseado na velocidade
+            deslocamento_angulo = abs(velocidade_horizontal) * fator_conversao
+
+            # A lógica de IF/ELSE agora calcula o ângulo em vez de apenas definir um texto
             if erro_posicao < -zona_morta:
                 comando_posicao = f"MOVER ESQUERDA (Vel: {abs(velocidade_horizontal):.1f})"
-                comando_pos_serial = 'L'  # L for Left
+                angulo_calculado = angulo_centro + deslocamento_angulo
             elif erro_posicao > zona_morta:
                 comando_posicao = f"MOVER DIREITA (Vel: {velocidade_horizontal:.1f})"
-                comando_pos_serial = 'R'  # R for Right
+                angulo_calculado = angulo_centro - deslocamento_angulo
             else:
                 comando_posicao = "CENTRALIZADO"
-                comando_pos_serial = 'C'  # C for Center
+                angulo_calculado = angulo_centro
                 velocidade_horizontal = 0
+
+            # NOVO: Garante que o ângulo final esteja sempre dentro dos limites seguros do servo (0-180)
+            angulo_final_servo = int(
+                max(angulo_min, min(angulo_max, angulo_calculado)))
 
             # --- 2. Controle de Distância (Frente/Trás) ---
             area_atual = bbox[2] * bbox[3]
@@ -169,10 +184,9 @@ while True:
                 comando_dist_serial = 'M'  # M for Manter
 
              # --- ENVIO DO COMANDO PARA O ARDUINO (NOVO) ---
-            if arduino is not None and comando_pos_serial and comando_dist_serial:
-                # Formata o comando como "P,D\n" (ex: "L,A\n")
-                comando_final_serial = f"{comando_pos_serial},{comando_dist_serial}\n"
-                # Envia o comando, codificado em bytes
+            if arduino is not None:
+                # O comando agora é "ANGULO,COMANDO_LED\n"
+                comando_final_serial = f"{angulo_final_servo},{comando_dist_serial}\n"
                 arduino.write(comando_final_serial.encode('utf-8'))
 
             # --- FIM DO CONTROLE PROPORCIONAL ---
@@ -241,8 +255,8 @@ while True:
         break
     # --- FINALIZAÇÃO (MODIFICADO) ---
 if arduino is not None:
-    # Manda um comando final para centralizar tudo antes de fechar
-    arduino.write('C,M\n'.encode('utf-8'))
+    # MODIFICADO: Manda um comando final para centralizar o servo (ângulo 90) e apagar os LEDs
+    arduino.write(f"90,M\n".encode('utf-8'))
     arduino.close()
     print("Conexão com o Arduino fechada.")
 
