@@ -1,11 +1,11 @@
-# essa é uma continuação da versão anterior, com a adição do controle proporcional, onde uma velocidade de correção é adicionada na tela
 import cv2
 import sys
-import serial  # NOVO: Importa a biblioteca para comunicação serial
-import time   # NOVO: Para dar um tempo para a conexão serial estabilizar
+import serial  # biblioteca para comunicação serial
+import time  # Para dar um tempo para a conexão serial estabilizar
 
-# --- CONFIGURAÇÃO DA COMUNICAÇÃO SERIAL (NOVO) ---
+# --- CONFIGURAÇÃO DA COMUNICAÇÃO SERIAL ---
 try:
+    # cria um objeto serial que representa a conexão com o Arduino
     arduino = serial.Serial(port='COM4', baudrate=9600, timeout=0.1)
     time.sleep(2)  # Espera 2 segundos para a conexão se estabelecer
     print("Conexão com o Arduino estabelecida.")
@@ -20,13 +20,15 @@ MODO_DETECCAO = 0
 MODO_RASTREAMENTO = 1
 # -------------------------
 
-# --- CONFIGURAÇÃO DO MODELO DE IA (DA AULA 13) ---
+# --- CONFIGURAÇÃO DO MODELO DE IA (DA AULA 13 de OPENCV) ---
 # Carrega as labels (nomes das classes)
 with open("coco_class_labels.txt") as fp:
     labels = fp.read().split("\n")
 
 # Caminhos para os arquivos do modelo TensorFlow
+# arquivo .pb, que contém os pesos do modelo treinado e a arquitetura da rede neural
 modelFile = "models/ssd_mobilenet_v2_coco_2018_03_29/frozen_inference_graph.pb"
+# descreve a estrutura da rede em formato legível para o OpenCV
 configFile = "models/ssd_mobilenet_v2_coco_2018_03_29.pbtxt"
 
 # Carrega a rede neural na memória
@@ -50,8 +52,9 @@ def selecionar_alvo_por_clique(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         # Se estivermos no modo de detecção
         if modo_atual == MODO_DETECCAO:
-            # Percorre todas as caixas detectadas no último frame
+            # Percorre todas as caixas detectadas no último frame, onde cada item é uma tupla (caixa, label, conf)
             for i, (caixa, label, conf) in enumerate(deteccoes_frame_atual):
+                # desempacota os valores da caixa
                 (x_caixa, y_caixa, w_caixa, h_caixa) = caixa
                 # Verifica se o clique (x, y) está dentro da caixa atual
                 if x >= x_caixa and x <= x_caixa + w_caixa and y >= y_caixa and y <= y_caixa + h_caixa:
@@ -109,6 +112,7 @@ while True:
     altura, largura, _ = frame.shape
 
     if modo_atual == MODO_RASTREAMENTO:
+        # - Atualiza a posição da bbox (bounding box) do objeto rastreado
         ok, bbox = tracker.update(frame)
 
         if ok:
@@ -132,16 +136,32 @@ while True:
 
             # Gera o comando de texto baseado na velocidade calculada
             zona_morta = 30  # Usamos a zona morta para o comando "PARADO"
+
+            # NOVO: Define os parâmetros para o controle do servo motor
+            fator_conversao = 4.5  # Sua calibração: graus por unidade de velocidade
+            angulo_centro = 90
+            angulo_min = 0
+            angulo_max = 180
+
+            # NOVO: Calcula o quanto o ângulo deve se deslocar a partir do centro, baseado na velocidade
+            # abs retorna o valor absoluto
+            deslocamento_angulo = abs(velocidade_horizontal) * fator_conversao
+
+            # A lógica de IF/ELSE agora calcula o ângulo em vez de apenas definir um texto
             if erro_posicao < -zona_morta:
                 comando_posicao = f"MOVER ESQUERDA (Vel: {abs(velocidade_horizontal):.1f})"
-                comando_pos_serial = 'L'  # L for Left
+                angulo_calculado = angulo_centro + deslocamento_angulo
             elif erro_posicao > zona_morta:
                 comando_posicao = f"MOVER DIREITA (Vel: {velocidade_horizontal:.1f})"
-                comando_pos_serial = 'R'  # R for Right
+                angulo_calculado = angulo_centro - deslocamento_angulo
             else:
                 comando_posicao = "CENTRALIZADO"
-                comando_pos_serial = 'C'  # C for Center
+                angulo_calculado = angulo_centro
                 velocidade_horizontal = 0
+
+            # NOVO: Garante que o ângulo final esteja sempre dentro dos limites seguros do servo (0-180)
+            angulo_final_servo = int(
+                max(angulo_min, min(angulo_max, angulo_calculado)))
 
             # --- 2. Controle de Distância (Frente/Trás) ---
             area_atual = bbox[2] * bbox[3]
@@ -151,8 +171,9 @@ while True:
             erro_area = area_atual - area_referencia
 
             # Ganho proporcional para o controle de distância
-            Kp_area = 0.001  # Este valor costuma ser bem menor
+            Kp_area = 0.001  # Este valor costuma ser bem menor, pois nao quero que o drone se aproxime/afaste muito rápido
             # Negativo para inverter a ação (se perto, afasta)
+            # O sinal negativo inverte a ação: se está perto, afasta.
             velocidade_profundidade = - (Kp_area * erro_area)
 
             # Gera o comando de texto
@@ -169,10 +190,9 @@ while True:
                 comando_dist_serial = 'M'  # M for Manter
 
              # --- ENVIO DO COMANDO PARA O ARDUINO (NOVO) ---
-            if arduino is not None and comando_pos_serial and comando_dist_serial:
-                # Formata o comando como "P,D\n" (ex: "L,A\n")
-                comando_final_serial = f"{comando_pos_serial},{comando_dist_serial}\n"
-                # Envia o comando, codificado em bytes
+            if arduino is not None:
+                # O comando agora é "ANGULO,COMANDO_LED\n"
+                comando_final_serial = f"{angulo_final_servo},{comando_dist_serial}\n"
                 arduino.write(comando_final_serial.encode('utf-8'))
 
             # --- FIM DO CONTROLE PROPORCIONAL ---
@@ -199,25 +219,31 @@ while True:
         deteccoes_frame_atual = []  # Limpa a lista a cada frame
         # --- LÓGICA DE DETECÇÃO (ADAPTADA DA AULA 13) ---
         blob = cv2.dnn.blobFromImage(frame, 1.0, size=(
+            # transforma a imagem (frame) em um blob, que é o formato que a rede neural espera como entrada.
             300, 300), mean=(0, 0, 0), swapRB=True, crop=False)
+        # Envia o blob como entrada para a rede neural, a rede neural agora esta pronto para fazer a detecção.
         net.setInput(blob)
-        detections = net.forward()
+        detections = net.forward()  # a rede analisa o frame e retorna as detecções
 
         # Itera sobre todas as detecções encontradas
+        # 2 representa o número de detecções
         for i in range(detections.shape[2]):
             confidence = detections[0, 0, i, 2]
             # Filtra detecções com baixa confiança
             if confidence > 0.5:
+                # - ID da classe detectada (ex: 1 = "person", 3 = "car", etc.).
                 class_id = int(detections[0, 0, i, 1])
-
-                # Para simplificar, vamos focar em alguns objetos comuns.
-                # Você pode remover ou alterar este 'if' para detectar tudo.
+                # Para simplificar, vou focar em alguns objetos comuns.
+                # podemos remover ou alterar este 'if' para detectar tudo.
                 objetos_alvo = ["person", "car",
                                 "bottle", "cat", "dog", "cell phone"]
                 if labels[class_id] in objetos_alvo:
                     # Calcula as coordenadas da caixa
+                    # Converte as coordenadas normalizadas (valores entre 0 e 1) para coordenadas reais da imagem.
                     x = int(detections[0, 0, i, 3] * largura)
+                    # multiplicando pela largura e altura do frame.
                     y = int(detections[0, 0, i, 4] * altura)
+                    # - Calcula w e h como diferença entre os extremos da caixa.
                     w = int(detections[0, 0, i, 5] * largura) - x
                     h = int(detections[0, 0, i, 6] * altura) - y
 
@@ -241,8 +267,8 @@ while True:
         break
     # --- FINALIZAÇÃO (MODIFICADO) ---
 if arduino is not None:
-    # Manda um comando final para centralizar tudo antes de fechar
-    arduino.write('C,M\n'.encode('utf-8'))
+    # MODIFICADO: Manda um comando final para centralizar o servo (ângulo 90) e apagar os LEDs
+    arduino.write(f"90,M\n".encode('utf-8'))
     arduino.close()
     print("Conexão com o Arduino fechada.")
 
