@@ -176,14 +176,30 @@ while True:
             # O sinal negativo inverte a ação: se está perto, afasta.
             velocidade_profundidade = - (Kp_area * erro_area)
 
+            # NOVO: Inicializa os valores de PWM para os LEDs
+            pwm_aproximar = 0
+            pwm_afastar = 0
+
+            # NOVO: Define um valor máximo para a velocidade para evitar brilho extremo
+            # Coloquei este valor pois percebi que o valor variava basicamente de 0 a 20, sendo mais que 20 considerado extremo
+            max_vel_distancia = 20
+
             # Gera o comando de texto
             threshold_area = 0.15  # 15% de margem
             if area_atual > area_referencia * (1 + threshold_area):
                 comando_distancia = f"AFASTAR (Vel: {abs(velocidade_profundidade):.1f})"
-                comando_dist_serial = 'F'  # F for Afastar
+                # NOVO: Mapeia a velocidade para um valor PWM (0-255)
+                # Como pwm vai de 0 a 255 e Vel vai de 0 a 20 entao 255/20 = 12.75, entao para cada unidade de vel eu aumento 12.75 no pwm
+                intensidade_vel = min(
+                    abs(velocidade_profundidade), max_vel_distancia)
+                pwm_afastar = int((intensidade_vel / max_vel_distancia) * 255)
             elif area_atual < area_referencia * (1 - threshold_area):
                 comando_distancia = f"APROXIMAR (Vel: {velocidade_profundidade:.1f})"
-                comando_dist_serial = 'A'  # A for Aproximar
+                # NOVO: Mapeia a velocidade para um valor PWM (0-255), mesma logica do if acima
+                intensidade_vel = min(
+                    abs(velocidade_profundidade), max_vel_distancia)
+                pwm_aproximar = int(
+                    (intensidade_vel / max_vel_distancia) * 255)
             else:
                 comando_distancia = "MANTER DISTANCIA"
                 velocidade_profundidade = 0
@@ -191,10 +207,9 @@ while True:
 
              # --- ENVIO DO COMANDO PARA O ARDUINO (NOVO) ---
             if arduino is not None:
-                # O comando agora é "ANGULO,COMANDO_LED\n"
-                comando_final_serial = f"{angulo_final_servo},{comando_dist_serial}\n"
+                # MODIFICADO: O comando agora é "ANGULO,PWM_APROXIMAR,PWM_AFASTAR\n"
+                comando_final_serial = f"{angulo_final_servo},{pwm_aproximar},{pwm_afastar}\n"
                 arduino.write(comando_final_serial.encode('utf-8'))
-
             # --- FIM DO CONTROLE PROPORCIONAL ---
 
             # Para um drone real, você enviaria os valores `velocidade_horizontal` e `velocidade_profundidade`
@@ -267,8 +282,8 @@ while True:
         break
     # --- FINALIZAÇÃO (MODIFICADO) ---
 if arduino is not None:
-    # MODIFICADO: Manda um comando final para centralizar o servo (ângulo 90) e apagar os LEDs
-    arduino.write(f"90,M\n".encode('utf-8'))
+    # MODIFICADO: Manda um comando final para centralizar o servo e apagar os LEDs (PWM 0)
+    arduino.write(f"90,0,0\n".encode('utf-8'))
     arduino.close()
     print("Conexão com o Arduino fechada.")
 
